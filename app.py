@@ -38,7 +38,13 @@ st.set_page_config(
 
 # Inyección de estilos CSS corporativos para entorno SOC de Ciberseguridad
 st.markdown("""
+<meta name="google" content="notranslate">
 <style>
+    /* Evitar que motores de traducción automática rompan el árbol DOM de React */
+    body, div, p, span, h1, h2, h3, h4, h5, h6 {
+        -webkit-font-smoothing: antialiased;
+    }
+    
     /* Tipografía y fondo principal */
     .stApp {
         background: radial-gradient(circle at 10% 20%, #0d131f 0%, #080c14 90%);
@@ -246,54 +252,59 @@ with tab_inspect:
     input_method = st.radio(
         "Seleccione el vector de entrada:",
         ["📁 Cargar Imagen QR (PNG, JPG, WEBP)", "📷 Escaneo en Vivo por Cámara Web", "⌨️ Entrada Manual de URL / Payload"],
-        horizontal=True
+        horizontal=True,
+        key="input_vector_method"
     )
     
     decoded_qr_text: str = ""
     annotated_qr_image = None
     decoding_method = ""
     
-    if input_method == "📁 Cargar Imagen QR (PNG, JPG, WEBP)":
-        uploaded_file = st.file_uploader(
-            "Cargue un archivo de imagen que contenga un código QR:",
-            type=["png", "jpg", "jpeg", "webp"],
-            help="Soporta resoluciones nativas, imágenes con bajo contraste y formatos estándar."
-        )
-        if uploaded_file is not None:
-            file_bytes = uploaded_file.read()
-            decode_res = qr_decoder.decode_from_bytes(file_bytes)
-            if decode_res["success"]:
-                decoded_qr_text = decode_res["data"]
-                annotated_qr_image = decode_res["annotated_image"]
-                decoding_method = decode_res["method"]
-                st.success(f"✅ Código QR decodificado exitosamente (Método de visión: `{decoding_method}`).")
-            else:
-                st.error(f"❌ {decode_res['error']}")
-                # Mostrar la imagen original para retroalimentación visual
-                st.image(file_bytes, caption="Imagen analizada sin QR detectable", width=300)
+    input_container = st.container()
+    
+    with input_container:
+        if input_method == "📁 Cargar Imagen QR (PNG, JPG, WEBP)":
+            uploaded_file = st.file_uploader(
+                "Cargue un archivo de imagen que contenga un código QR:",
+                type=["png", "jpg", "jpeg", "webp"],
+                key="qr_file_uploader_widget",
+                help="Soporta fotos móviles de alta resolución, imágenes con bajo contraste y formatos estándar."
+            )
+            if uploaded_file is not None:
+                file_bytes = uploaded_file.read()
+                decode_res = qr_decoder.decode_from_bytes(file_bytes)
+                if decode_res["success"]:
+                    decoded_qr_text = decode_res["data"]
+                    annotated_qr_image = decode_res["annotated_image"]
+                    decoding_method = decode_res["method"]
+                    st.success(f"✅ Código QR detectado y decodificado exitosamente (Algoritmo: `{decoding_method}`).")
+                else:
+                    st.warning(f"⚠️ {decode_res['error']}")
+                    st.image(file_bytes, caption="Imagen analizada sin QR detectable", width=300)
 
-    elif input_method == "📷 Escaneo en Vivo por Cámara Web":
-        st.info("Presente el código QR ante la cámara de su dispositivo y capture el fotograma:")
-        camera_photo = st.camera_input("Capturar código QR en vivo")
-        if camera_photo is not None:
-            photo_bytes = camera_photo.read()
-            decode_res = qr_decoder.decode_from_bytes(photo_bytes)
-            if decode_res["success"]:
-                decoded_qr_text = decode_res["data"]
-                annotated_qr_image = decode_res["annotated_image"]
-                decoding_method = decode_res["method"]
-                st.success(f"✅ Código QR extraído de la cámara web (Método de visión: `{decoding_method}`).")
-            else:
-                st.error(f"❌ {decode_res['error']}")
-                st.image(photo_bytes, caption="Captura de cámara sin QR identificado", width=320)
+        elif input_method == "📷 Escaneo en Vivo por Cámara Web":
+            st.info("Presente el código QR ante la cámara de su dispositivo y capture el fotograma:")
+            camera_photo = st.camera_input("Capturar código QR en vivo", key="qr_camera_scanner_widget")
+            if camera_photo is not None:
+                photo_bytes = camera_photo.read()
+                decode_res = qr_decoder.decode_from_bytes(photo_bytes)
+                if decode_res["success"]:
+                    decoded_qr_text = decode_res["data"]
+                    annotated_qr_image = decode_res["annotated_image"]
+                    decoding_method = decode_res["method"]
+                    st.success(f"✅ Código QR extraído de la cámara (Algoritmo: `{decoding_method}`).")
+                else:
+                    st.warning(f"⚠️ {decode_res['error']}")
+                    st.image(photo_bytes, caption="Captura de cámara procesada", width=320)
 
-    else:  # Entrada Manual
-        default_val = st.session_state.get("sample_url_to_analyze", "")
-        decoded_qr_text = st.text_input(
-            "Ingrese la URL o texto del señuelo para inspección heurística directa:",
-            value=default_val,
-            placeholder="https://ejemplo-bancario-sospechoso.xyz/login"
-        )
+        else:  # Entrada Manual
+            default_val = st.session_state.get("sample_url_to_analyze", "")
+            decoded_qr_text = st.text_input(
+                "Ingrese la URL o texto del señuelo para inspección heurística directa:",
+                value=default_val,
+                key="qr_manual_input_widget",
+                placeholder="https://ejemplo-bancario-sospechoso.xyz/login"
+            )
 
     # Si hay una imagen con anotación QR detectada, mostrarla
     if annotated_qr_image is not None:
@@ -308,7 +319,7 @@ with tab_inspect:
     # Botón para detonar el análisis integral de ciberseguridad
     if decoded_qr_text:
         st.markdown("---")
-        btn_analyze = st.button("🚀 Ejecutar Inspección Defensiva Integral", type="primary", use_container_width=True)
+        btn_analyze = st.button("🚀 Ejecutar Inspección Defensiva Integral", type="primary", key="btn_trigger_inspection", use_container_width=True)
 
         if btn_analyze:
             with st.status("🔍 Ejecutando Cadena Defensiva de Inspección y Aislamiento...", expanded=True) as status:
