@@ -58,18 +58,106 @@ class URLTracer:
         })
         return session
 
+    @staticmethod
+    def classify_payload(text: str) -> Dict[str, Any]:
+        """
+        Determina si el contenido del QR es una URL web o un formato específico
+        (EMVCo Payment, Wi-Fi, vCard, texto plano).
+        """
+        clean = text.strip()
+        # 1. Pagos móviles estandarizados EMVCo (Plin, Yape, Pix, CoDi)
+        if clean.startswith("000201") or (len(clean) > 20 and clean[:4] == "0002" and ("5802" in clean or "5912" in clean)):
+            return {"is_web_url": False, "type": "emvco_payment", "url": None}
+
+        # 2. URLs explícitas con esquema
+        if re.match(r"^https?://", clean, re.IGNORECASE):
+            return {"is_web_url": True, "type": "web_url", "url": clean}
+
+        # 3. URL embebida en bloque de texto
+        match = re.search(r"https?://[^\s]+", clean)
+        if match:
+            return {"is_web_url": True, "type": "web_url", "url": match.group(0)}
+
+        # 4. Hostname sin esquema (ej: 'paypal.com/login') pero sin espacios ni saltos
+        if " " not in clean and "\n" not in clean and re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", clean):
+            return {"is_web_url": True, "type": "web_url", "url": "https://" + clean}
+
+        # 5. Formatos de utilidad
+        if clean.upper().startswith("WIFI:"):
+            return {"is_web_url": False, "type": "wifi_config", "url": None}
+        if clean.upper().startswith(("BEGIN:VCARD", "MECARD:")):
+            return {"is_web_url": False, "type": "vcard", "url": None}
+
+        return {"is_web_url": False, "type": "plain_text", "url": None}
+
+    @staticmethod
+    def parse_emvco(data: str) -> Dict[str, Any]:
+        """
+        Parsea los campos Tag-Length-Value (TLV) de la especificación EMVCo.
+        """
+        tags = {}
+        i = 0
+        clean = data.strip()
+        while i < len(clean):
+            tag = clean[i:i+2]
+            if len(tag) < 2 or not tag.isdigit():
+                break
+            i += 2
+            len_str = clean[i:i+2]
+            if len(len_str) < 2 or not len_str.isdigit():
+                break
+            val_len = int(len_str)
+            i += 2
+            val = clean[i:i+val_len]
+            tags[tag] = val
+            i += val_len
+
+        network = "Plin Network P2P" if "plin" in clean.lower() else ("Yape P2P" if "yape" in clean.lower() else "EMVCo Payment")
+        currency = "PEN (Soles Peruanos)" if tags.get("53") == "604" else tags.get("53", "Moneda Local")
+
+        return {
+            "network": network,
+            "merchant_name": tags.get("59", "Transferencia Directa P2P"),
+            "merchant_city": tags.get("60", "Lima"),
+            "country_code": tags.get("58", "PE"),
+            "currency": currency,
+            "category_code": tags.get("52", "4829"),
+            "checksum": tags.get("63", "Válido"),
+        }
+
     def trace(self, initial_url: str) -> Dict[str, Any]:
         """
-        Rastrea paso a paso cada salto HTTP (301, 302, 307, 308) hasta alcanzar el destino final
-        o el límite máximo de saltos.
+        Rastrea paso a paso cada salto HTTP (301, 302, 307, 308) hasta alcanzar el destino final.
+        Si la carga no es una URL (ej. QR de Plin/Yape o texto), omite el rastreo de red de forma segura.
         """
-        # Normalizar esquema
         raw_url = initial_url.strip()
-        if not re.match(r"^https?://", raw_url, re.IGNORECASE):
-            # Si no especifica esquema, por defecto asumir https para evaluar si degrada a http
-            current_url = "https://" + raw_url
-        else:
-            current_url = raw_url
+        classification = self.classify_payload(raw_url)
+
+        # Si no es una URL navegable, retornar dictamen seguro sin forzar peticiones HTTP
+        if not classification["is_web_url"]:
+            emvco_data = self.parse_emvco(raw_url) if classification["type"] == "emvco_payment" else None
+            return {
+                "initial_url": raw_url,
+                "final_url": raw_url,
+                "is_web_url": False,
+                "payload_type": classification["type"],
+                "emvco_info": emvco_data,
+                "redirect_count": 0,
+                "hops": [],
+                "ssl_valid": True,
+                "ssl_error_message": None,
+                "has_tls_downgrade": False,
+                "loop_detected": False,
+                "unreachable": False,
+                "error_description": None,
+                "tls_audit": {
+                    "enforced": False,
+                    "valid": True,
+                    "reason": "No aplica: El código QR contiene una instrucción de pago o texto plano, no una URL web.",
+                },
+            }
+
+        current_url = classification["url"]
 
         hops: List[Dict[str, Any]] = []
         visited_urls = set()

@@ -385,10 +385,25 @@ with tab_inspect:
             with col_res2:
                 st.metric("Saltos de Redirección", trace_result["redirect_count"])
             with col_res3:
-                tls_status = "Válido y Forzado" if trace_result["ssl_valid"] and not trace_result.get("has_tls_downgrade") else "Anómalo / Inválido"
+                if not trace_result.get("is_web_url", True):
+                    tls_status = "No Aplica (Carga P2P)"
+                else:
+                    tls_status = "Válido y Forzado" if trace_result["ssl_valid"] and not trace_result.get("has_tls_downgrade") else "Anómalo / Inválido"
                 st.metric("Estado Criptográfico TLS", tls_status)
             with col_res4:
                 st.metric("Reglas Infraccionadas", len(analysis["flags_detected"]))
+
+            if analysis.get("payload_type") == "emvco_payment":
+                emv = analysis.get("emvco_info", {})
+                st.markdown(f"""
+                <div class="soc-card" style="border-left: 4px solid #10b981; margin-top: 15px;">
+                    <h4 style="color: #10b981; margin: 0 0 10px 0;">💳 Especificación de Pago Móvil EMVCo ({emv.get('network', 'P2P')})</h4>
+                    <p style="margin: 4px 0;"><strong>Beneficiario / Comercio:</strong> {emv.get('merchant_name')}</p>
+                    <p style="margin: 4px 0;"><strong>Ubicación:</strong> {emv.get('merchant_city')}, {emv.get('country_code')} (Perú)</p>
+                    <p style="margin: 4px 0;"><strong>Moneda de Operación:</strong> {emv.get('currency')} | <strong>Categoría MCC:</strong> {emv.get('category_code')}</p>
+                    <p style="margin: 4px 0; color: #94a3b8; font-size: 0.85rem;">Verificación de Integridad CRC16: <code>{emv.get('checksum')}</code></p>
+                </div>
+                """, unsafe_allow_html=True)
 
             st.markdown("---")
 

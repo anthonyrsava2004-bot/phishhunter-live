@@ -224,3 +224,37 @@ def test_database_persistence_and_metrics(temp_db):
 
     csv_export = temp_db.export_to_csv()
     assert "paypa1.xyz" in csv_export
+
+
+def test_emvco_plin_payment_payload(heuristic_engine):
+    """Verifica clasificación y dictamen seguro para códigos QR de pagos móviles EMVCo (Plin/Yape)."""
+    from core.url_tracer import URLTracer
+    plin_payload = "0002010102115204482953036045912P2P Transfer6004Lima265600329b8b0f9aae9948a59d0bb419669673fc0116Plin Network P2P5802PE63040DB7"
+    
+    # 1. Clasificación
+    classification = URLTracer.classify_payload(plin_payload)
+    assert classification["is_web_url"] is False
+    assert classification["type"] == "emvco_payment"
+    
+    # 2. Parseo EMVCo
+    emvco = URLTracer.parse_emvco(plin_payload)
+    assert emvco["network"] == "Plin Network P2P"
+    assert emvco["country_code"] == "PE"
+    assert emvco["merchant_city"] == "Lima"
+    assert "Soles" in emvco["currency"]
+    
+    # 3. Análisis heurístico (debe ser SEGURO y score 0)
+    result = heuristic_engine.analyze(plin_payload)
+    assert result["risk_score"] == 0
+    assert result["risk_level"] == "SEGURO"
+    assert len(result["flags_detected"]) == 0
+    assert result["payload_type"] == "emvco_payment"
+
+
+def test_plain_text_payload_safe(heuristic_engine):
+    """Verifica que textos informativos sin URLs no sean penalizados con infracciones de TLS."""
+    plain_text = "Mesa 14 - Pedido Restaurante"
+    result = heuristic_engine.analyze(plain_text)
+    assert result["risk_score"] == 0
+    assert result["risk_level"] == "SEGURO"
+    assert len(result["flags_detected"]) == 0

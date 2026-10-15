@@ -45,10 +45,62 @@ class HeuristicEngine:
         raw_text = raw_data.strip()
         flags: List[Dict[str, Any]] = []
 
-        # Determinar si el contenido es una URL o texto arbitrario
-        target_url = trace_result.get("final_url", raw_text) if trace_result else raw_text
+        # Verificar si la carga útil es una URL web o un formato específico (EMVCo, Wi-Fi, etc.)
+        from core.url_tracer import URLTracer
+        classification = URLTracer.classify_payload(raw_text)
+
+        if not classification["is_web_url"]:
+            payload_type = classification["type"]
+            if payload_type == "emvco_payment":
+                emvco_info = URLTracer.parse_emvco(raw_text)
+                return {
+                    "risk_score": 0,
+                    "risk_level": "SEGURO",
+                    "risk_badge": "🟢",
+                    "action_recommended": (
+                        f"CARGA FINANCIERA VÁLIDA ({emvco_info['network']}): Código QR de pago móvil "
+                        f"estandarizado EMVCo ({emvco_info['merchant_city']}, {emvco_info['country_code']}). "
+                        f"No contiene hipervínculos web ni representa una amenaza de Quishing por navegación."
+                    ),
+                    "flags_detected": [],
+                    "total_penalties": 0,
+                    "target_url": raw_text,
+                    "target_hostname": "EMVCo Payment Protocol",
+                    "is_web_url": False,
+                    "payload_type": "emvco_payment",
+                    "emvco_info": emvco_info,
+                }
+            elif payload_type == "wifi_config":
+                return {
+                    "risk_score": 0,
+                    "risk_level": "SEGURO",
+                    "risk_badge": "🟢",
+                    "action_recommended": "CONFIGURACIÓN WI-FI: Código QR de credenciales de red inalámbrica sin riesgo de Quishing.",
+                    "flags_detected": [],
+                    "total_penalties": 0,
+                    "target_url": raw_text,
+                    "target_hostname": "Wi-Fi Config Protocol",
+                    "is_web_url": False,
+                    "payload_type": "wifi_config",
+                }
+            else:
+                return {
+                    "risk_score": 0,
+                    "risk_level": "SEGURO",
+                    "risk_badge": "🟢",
+                    "action_recommended": "TEXTO PLANO INFORMATIVO: Carga útil no ejecutable sin hipervínculos web activos.",
+                    "flags_detected": [],
+                    "total_penalties": 0,
+                    "target_url": raw_text,
+                    "target_hostname": "Plain Text Payload",
+                    "is_web_url": False,
+                    "payload_type": "plain_text",
+                }
+
+        # Si es una URL web navegable, proceder con la inspección heurística completa
+        target_url = trace_result.get("final_url", classification["url"]) if trace_result else classification["url"]
         parsed_target = urlparse(target_url if "://" in target_url else f"http://{target_url}")
-        parsed_initial = urlparse(raw_text if "://" in raw_text else f"http://{raw_text}")
+        parsed_initial = urlparse(classification["url"])
 
         target_hostname = parsed_target.hostname or ""
         initial_hostname = parsed_initial.hostname or ""

@@ -48,11 +48,47 @@ class SandboxPreview:
         2. Snapshot HTML sanitizado y neutralizado apto para renderizado en contenedor seguro.
         3. Resumen textual pasivo.
         """
-        if not target_url or not re.match(r"^https?://", target_url, re.IGNORECASE):
-            return self._empty_result(
-                target_url,
-                error="URL no válida para inspección en Sandbox pasivo."
-            )
+        clean_url = (target_url or "").strip()
+        if not clean_url or not re.match(r"^https?://", clean_url, re.IGNORECASE):
+            # 1. Caso especial: Código de pago EMVCo (Plin / Yape / P2P)
+            if clean_url.startswith("000201") or ("5802PE" in clean_url and "0002" in clean_url):
+                return {
+                    "success": True,
+                    "url": clean_url,
+                    "status_code": 200,
+                    "is_dangerous": False,
+                    "isolated": False,
+                    "metadata": {
+                        "title": "Instrucción de Pago EMVCo (Plin / Yape / P2P)",
+                        "description": "Carga útil de pago móvil estandarizada según norma EMVCo. No es una página web ni requiere navegación HTTP.",
+                        "site_name": "Protocolo Financiero EMVCo P2P",
+                        "image_url": None,
+                        "favicon_url": None,
+                    },
+                    "sanitized_html": "<div style='padding:15px; background:rgba(16,185,129,0.1); border:1px solid #10b981; border-radius:8px; color:#10b981;'><strong>Carga Financiera Segura:</strong> Código QR de transferencia bancaria directa Plin/Yape. No contiene hipervínculos ejecutables en navegador.</div>",
+                    "text_summary": f"Carga útil EMVCo identificada: {clean_url}",
+                    "page_size_kb": round(len(clean_url.encode('utf-8')) / 1024, 2),
+                    "error": None,
+                }
+            # 2. Caso: Texto plano o credencial local
+            return {
+                "success": True,
+                "url": clean_url,
+                "status_code": 200,
+                "is_dangerous": False,
+                "isolated": False,
+                "metadata": {
+                    "title": "Carga Útil de Texto Plano",
+                    "description": "El código QR contiene texto estático o parámetros locales, no un enlace web.",
+                    "site_name": "Texto Plano / Formato Local",
+                    "image_url": None,
+                    "favicon_url": None,
+                },
+                "sanitized_html": f"<div style='padding:15px; color:#94a3b8;'><strong>Contenido de texto:</strong> {html.escape(clean_url)}</div>",
+                "text_summary": clean_url[:400],
+                "page_size_kb": round(len(clean_url.encode('utf-8')) / 1024, 2),
+                "error": None,
+            }
 
         headers = {
             "User-Agent": self.DEFAULT_USER_AGENT,
@@ -241,6 +277,12 @@ class SandboxPreview:
         """
         Estructura por defecto cuando la extracción remota no es factible.
         """
+        safe_site = "Desconocido"
+        try:
+            safe_site = urlparse(url).hostname or "Desconocido"
+        except Exception:
+            safe_site = "Carga no URL"
+
         return {
             "success": False,
             "url": url,
@@ -250,7 +292,7 @@ class SandboxPreview:
             "metadata": {
                 "title": "Recurso Inaccesible o Bloqueado",
                 "description": error,
-                "site_name": urlparse(url).hostname or "Desconocido",
+                "site_name": safe_site,
                 "image_url": None,
                 "favicon_url": None,
             },
